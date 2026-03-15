@@ -33,8 +33,7 @@ export default async function BoardCreatePage() {
     if (existingSquares && existingSquares.length === 10) {
       initialSquares = existingSquares.map((s) => ({
         index: s.index,
-        phase: s.phase,
-        ageRange: s.age_range,
+        age: s.age_range ?? "",
         event: s.event,
         squareType: (s.square_type ?? "branch") as "branch" | "effect",
         choiceA: s.choice_a ?? "",

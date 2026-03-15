@@ -22,8 +22,7 @@ export type SquareType = "branch" | "effect";
 
 export type SquareInput = {
   index: number;
-  phase: string;
-  ageRange: string;
+  age: string;
   event: string;
   squareType: SquareType;
   // 分岐マス用
@@ -35,19 +34,14 @@ export type SquareInput = {
 };
 
 export function createEmptySquares(): SquareInput[] {
-  return Array.from({ length: 10 }, (_, i) => {
-    const index = i + 1;
-    const phase = getPhaseByIndex(index);
-    return {
-      index,
-      phase: phase.label,
-      ageRange: phase.ageRange,
-      event: "",
-      squareType: "branch",
-      choiceA: "",
-      choiceB: "",
-      answerIndex: 0,
-      effect: 1,
-    };
-  });
+  return Array.from({ length: 10 }, (_, i) => ({
+    index: i + 1,
+    age: "",
+    event: "",
+    squareType: "branch" as SquareType,
+    choiceA: "",
+    choiceB: "",
+    answerIndex: 0 as 0 | 1,
+    effect: 1 as 1 | -1,
+  }));
 }

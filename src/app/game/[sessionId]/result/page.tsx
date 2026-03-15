@@ -92,7 +92,7 @@ export default async function ResultPage({
                     {isEffect ? "⚡" : "🔀"}
                   </span>
                   <span className="text-xs text-gray-400">
-                    {isEffect ? "" : `${sq.index}マス目・`}{sq.phase}・{sq.age_range}
+                    {isEffect ? "" : `${sq.index}マス目`}{sq.age_range ? `・${sq.age_range}` : ""}
                   </span>
                   {wasPlayed && (
                     <span className="ml-auto text-sm">

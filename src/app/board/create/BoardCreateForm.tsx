@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { PHASES, type SquareInput } from "@/lib/phases";
+import { type SquareInput } from "@/lib/phases";
 
 export default function BoardCreateForm({
   initialTitle,
@@ -22,7 +22,6 @@ export default function BoardCreateForm({
   const [birthPlace, setBirthPlace] = useState(initialBirthPlace);
   const [birthYear, setBirthYear] = useState(initialBirthYear);
   const [squares, setSquares] = useState<SquareInput[]>(initialSquares);
-  const [currentPhaseIdx, setCurrentPhaseIdx] = useState(0);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -32,31 +31,16 @@ export default function BoardCreateForm({
     );
   }
 
-  const currentPhase = PHASES[currentPhaseIdx];
-  const currentSquares = squares.filter(
-    (s) =>
-      s.index >= currentPhase.squareIndices[0] &&
-      s.index <= currentPhase.squareIndices[1]
-  );
-
-  function isPhaseComplete(phaseIdx: number): boolean {
-    const phase = PHASES[phaseIdx];
-    return squares
-      .filter(
-        (s) =>
-          s.index >= phase.squareIndices[0] &&
-          s.index <= phase.squareIndices[1]
-      )
-      .every((s) => {
-        if (!s.event.trim()) return false;
-        if (s.squareType === "branch") {
-          return s.choiceA.trim() !== "" && s.choiceB.trim() !== "";
-        }
-        return true; // 効果マスは出来事テキストのみ必須
-      });
+  function isSquareComplete(s: SquareInput): boolean {
+    if (!s.event.trim()) return false;
+    if (s.squareType === "branch") {
+      return s.choiceA.trim() !== "" && s.choiceB.trim() !== "";
+    }
+    return true;
   }
 
-  const allComplete = PHASES.every((_, i) => isPhaseComplete(i));
+  const completedCount = squares.filter(isSquareComplete).length;
+  const allComplete = completedCount === 10;
 
   async function handleSave() {
     setError(null);
@@ -146,37 +130,36 @@ export default function BoardCreateForm({
           </div>
         </div>
 
-        {/* フェーズタブ */}
-        <div className="mb-4 flex gap-1 overflow-x-auto rounded-xl bg-white p-1 shadow-sm">
-          {PHASES.map((phase, i) => (
-            <button
-              key={i}
-              onClick={() => setCurrentPhaseIdx(i)}
-              className={`relative flex-1 whitespace-nowrap rounded-lg px-3 py-2 text-xs font-medium transition-colors ${
-                currentPhaseIdx === i
-                  ? "bg-amber-500 text-white shadow"
-                  : "text-gray-500 hover:text-amber-700"
-              }`}
-            >
-              {phase.label}
-              {isPhaseComplete(i) && (
-                <span className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-green-400" />
-              )}
-            </button>
-          ))}
+        {/* 進捗バー */}
+        <div className="mb-4 flex items-center gap-3">
+          <div className="flex-1 overflow-hidden rounded-full bg-gray-200 h-2">
+            <div
+              className="h-2 rounded-full bg-amber-400 transition-all"
+              style={{ width: `${(completedCount / 10) * 100}%` }}
+            />
+          </div>
+          <span className="text-xs font-medium text-gray-500 shrink-0">{completedCount} / 10 完了</span>
         </div>
 
-        {/* マス入力フォーム */}
+        {/* マス入力フォーム（全10マス） */}
         <div className="space-y-4">
-          {currentSquares.map((square) => (
+          {squares.map((square) => (
             <div key={square.index} className="rounded-2xl bg-white p-5 shadow-sm">
               <div className="mb-3 flex items-center gap-2">
-                <span className="flex h-7 w-7 items-center justify-center rounded-full bg-amber-500 text-xs font-bold text-white">
+                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-amber-500 text-xs font-bold text-white">
                   {square.index}
                 </span>
-                <span className="text-xs font-medium text-amber-700">
-                  {square.phase}・{square.ageRange}
-                </span>
+                <input
+                  type="text"
+                  value={square.age}
+                  onChange={(e) => updateSquare(square.index, "age", e.target.value)}
+                  maxLength={20}
+                  placeholder="例: 5歳、小学2年生"
+                  className="flex-1 rounded-lg border border-gray-200 px-3 py-1.5 text-sm text-gray-900 placeholder-gray-400 outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-100"
+                />
+                {isSquareComplete(square) && (
+                  <span className="text-green-400 text-sm shrink-0">✓</span>
+                )}
               </div>
 
               {/* マス種別トグル */}
@@ -290,40 +273,22 @@ export default function BoardCreateForm({
           ))}
         </div>
 
-        {/* ナビゲーション */}
-        <div className="mt-6 flex gap-3">
-          {currentPhaseIdx > 0 && (
-            <button
-              onClick={() => setCurrentPhaseIdx((i) => i - 1)}
-              className="flex-1 rounded-xl border border-amber-300 py-3 text-sm font-medium text-amber-700 transition hover:bg-amber-50"
-            >
-              ← 前のフェーズ
-            </button>
-          )}
-          {currentPhaseIdx < PHASES.length - 1 ? (
-            <button
-              onClick={() => setCurrentPhaseIdx((i) => i + 1)}
-              className="flex-1 rounded-xl bg-amber-500 py-3 text-sm font-semibold text-white transition hover:bg-amber-600"
-            >
-              次のフェーズへ →
-            </button>
-          ) : (
-            <button
-              onClick={handleSave}
-              disabled={!allComplete || saving}
-              className="flex-1 rounded-xl bg-green-500 py-3 text-sm font-semibold text-white transition hover:bg-green-600 disabled:opacity-40"
-            >
-              {saving ? "保存中..." : isEditing ? "✓ 変更を保存する" : "✓ ボードを完成させる"}
-            </button>
-          )}
+        {/* 保存ボタン */}
+        <div className="mt-6">
+          <button
+            onClick={handleSave}
+            disabled={!allComplete || saving}
+            className="w-full rounded-xl bg-green-500 py-3 text-sm font-semibold text-white transition hover:bg-green-600 disabled:opacity-40"
+          >
+            {saving ? "保存中..." : isEditing ? "✓ 変更を保存する" : "✓ ボードを完成させる"}
+          </button>
         </div>
 
         {error && (
           <p className="mt-4 rounded-lg bg-red-50 px-4 py-2.5 text-sm text-red-600">{error}</p>
         )}
 
-        <div className="mt-6 flex items-center justify-between text-xs text-gray-400">
-          <span>{PHASES.filter((_, i) => isPhaseComplete(i)).length} / {PHASES.length} フェーズ完了</span>
+        <div className="mt-4 text-right text-xs text-gray-400">
           <a href="/" className="underline hover:text-gray-600">キャンセル</a>
         </div>
       </div>

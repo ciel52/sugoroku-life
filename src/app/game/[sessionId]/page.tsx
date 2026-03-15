@@ -59,12 +59,23 @@ export default async function GamePage({
   const opponentBirthPlace = opponentBoard?.birth_place ?? null;
   const opponentBirthYear = opponentBoard?.birth_year ?? null;
 
-  // 相手のボードのマスを取得
+  // 相手のボードのマスを取得（自分がプレイする）
   const { data: squares } = await supabase
     .from("squares")
     .select("index, phase, age_range, event, square_type, choice_a, choice_b, answer_index, effect")
     .eq("board_id", opponentBoardId)
     .order("index");
+
+  // 自分のボードのマスを取得（相手が観戦する）
+  const { data: mySquares } = await supabase
+    .from("squares")
+    .select("index, phase, age_range, event, square_type, choice_a, choice_b, answer_index, effect")
+    .eq("board_id", myBoardId)
+    .order("index");
+
+  const myBoard = isPlayerA ? boardA : boardB;
+  const myBirthPlace = myBoard?.birth_place ?? null;
+  const myBirthYear = myBoard?.birth_year ?? null;
 
   // 自分のこれまでのターン
   const { data: myTurns } = await supabase
@@ -88,6 +99,7 @@ export default async function GamePage({
     <GameBoard
       sessionId={sessionId}
       squares={squares ?? []}
+      mySquares={mySquares ?? []}
       initialTurns={myTurns ?? []}
       initialOpponentTurns={opponentTurns ?? []}
       opponentNickname={opponentNickname}
@@ -96,6 +108,8 @@ export default async function GamePage({
       opponentUserId={opponentUserId ?? ""}
       opponentBirthPlace={opponentBirthPlace}
       opponentBirthYear={opponentBirthYear}
+      myBirthPlace={myBirthPlace}
+      myBirthYear={myBirthYear}
       initialCurrentTurnPlayerId={session.current_turn_player_id ?? user.id}
     />
   );

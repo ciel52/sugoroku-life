@@ -54,8 +54,8 @@ export async function POST(request: Request) {
   const squareRows = squares.map((s) => ({
     board_id: boardId,
     index: s.index,
-    phase: s.phase,
-    age_range: s.ageRange,
+    phase: s.age ?? "",
+    age_range: s.age ?? "",
     event: s.event,
     square_type: s.squareType,
     choice_a: s.squareType === "branch" ? s.choiceA : null,
