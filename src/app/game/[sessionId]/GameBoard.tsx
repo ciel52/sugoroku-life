@@ -55,6 +55,7 @@ export default function GameBoard({
   mySquares,
   initialTurns,
   initialOpponentTurns,
+  initialOpponentPosition,
   opponentNickname,
   myNickname,
   myUserId,
@@ -70,6 +71,7 @@ export default function GameBoard({
   mySquares: Square[];
   initialTurns: Turn[];
   initialOpponentTurns: Turn[];
+  initialOpponentPosition: number | null;
   opponentNickname: string;
   myNickname: string;
   myUserId: string;
@@ -91,13 +93,8 @@ export default function GameBoard({
   const [currentTurnPlayerId, setCurrentTurnPlayerId] = useState(initialCurrentTurnPlayerId);
   const [opponentPresence, setOpponentPresence] = useState<OpponentPresence | null>(null);
   // 観戦モード用：相手が最後に着地したマス番号（action が landing 以外になっても位置を保持）
-  const [lastLandedPosition, setLastLandedPosition] = useState<number | null>(() => {
-    // 初期値：DBの確定済みターンから計算（ページロード時に前ターンの位置を復元）
-    if (initialOpponentTurns.length > 0) {
-      return Math.max(...initialOpponentTurns.map((t) => t.square_index));
-    }
-    return null;
-  });
+  // initialOpponentPosition = turns + effect_visits 両方から計算した初期位置（page.tsx で計算済み）
+  const [lastLandedPosition, setLastLandedPosition] = useState<number | null>(initialOpponentPosition);
 
   const [position, setPosition] = useState<number>(() => {
     if (initialTurns.length === 0) return 1;
@@ -173,8 +170,9 @@ export default function GameBoard({
 
         // ゲーム終了は broadcast イベントで処理するため、ここでは何もしない
 
-        // 相手が着地した瞬間に位置を記録（choosing/revealed 中も位置を保持するため）
-        if (others?.action === "landed" && others.targetSquareIndex != null) {
+        // targetSquareIndex が含まれるアクションはすべて位置を更新
+        // （landed → choosing/revealed/effect_viewing が一瞬で連続しても確実に捕捉する）
+        if (others?.targetSquareIndex != null) {
           setLastLandedPosition(others.targetSquareIndex);
         }
 
@@ -229,7 +227,15 @@ export default function GameBoard({
 
         setTimeout(() => {
           const rawTarget = position + (final - 1);
-          const targetIndex = Math.min(rawTarget, 10);
+
+          // ゴール判定：10マス目の1マス後（position 11以上）に到達したら即終了
+          if (rawTarget > 10) {
+            channelRef.current?.send({ type: "broadcast", event: "game_over", payload: {} });
+            setPhase("finished");
+            return;
+          }
+
+          const targetIndex = rawTarget;
 
           if (targetIndex > position) {
             setSkippedIndices((prev) => {
@@ -249,12 +255,12 @@ export default function GameBoard({
 
           if (sq?.square_type === "effect") {
             setPhase("effect");
-            trackAction({ action: "effect_viewing", currentSquare: sq ? {
+            trackAction({ action: "effect_viewing", targetSquareIndex: targetIndex, currentSquare: sq ? {
               index: sq.index, event: sq.event, square_type: sq.square_type, effect: sq.effect,
             } : undefined });
           } else {
             setPhase("choosing");
-            trackAction({ action: "choosing", currentSquare: sq ? {
+            trackAction({ action: "choosing", targetSquareIndex: targetIndex, currentSquare: sq ? {
               index: sq.index, event: sq.event, square_type: sq.square_type,
               choice_a: sq.choice_a, choice_b: sq.choice_b,
             } : undefined });
@@ -283,6 +289,7 @@ export default function GameBoard({
     setPhase("revealed");
     trackAction({
       action: "revealed",
+      targetSquareIndex: currentSquareIndex,
       chosenIndex,
       isCorrect: data.isCorrect,
       answerIndex: data.answerIndex,
@@ -331,7 +338,9 @@ export default function GameBoard({
     }
 
     // 通常ターン終了：Presence で相手に通知してターン切り替え
-    trackAction({ action: "idle", nextTurnPlayerId: opponentUserId });
+    // targetSquareIndex は効果後の実際の表示位置（newPos - 1）を使う
+    // アクティブ側の isStandingHere が position-1 を参照するため合わせる
+    trackAction({ action: "idle", nextTurnPlayerId: opponentUserId, targetSquareIndex: newPos - 1 });
     setCurrentTurnPlayerId(opponentUserId);
     setPhase("idle");
     setCurrentSquareIndex(null);
@@ -349,7 +358,10 @@ export default function GameBoard({
     }
 
     // 通常ターン終了：Presence で相手に通知してターン切り替え
-    trackAction({ action: "idle", nextTurnPlayerId: opponentUserId });
+    // targetSquareIndex = currentSquareIndex（今プレイしたマス）
+    // アクティブ側の isStandingHere が position-1 = nextPosition-1 = currentSquareIndex を参照するため一致
+    const playedIndex = currentSquareIndex!;
+    trackAction({ action: "idle", nextTurnPlayerId: opponentUserId, targetSquareIndex: playedIndex });
     setCurrentTurnPlayerId(opponentUserId);
     setPosition(nextPosition);
     setPhase("idle");
@@ -674,7 +686,7 @@ export default function GameBoard({
                 onClick={handleNext}
                 className="mt-4 w-full rounded-xl bg-amber-500 py-3 text-sm font-black text-white shadow-lg shadow-amber-500/20 transition hover:bg-amber-400 active:scale-95"
               >
-                {currentSquareIndex! + 1 > 10 ? "結果を見る 🎊" : "次のマスへ →"}
+                {currentSquareIndex! >= 10 ? "ゴールへ 🎊" : "次のマスへ →"}
               </button>
             )}
           </div>

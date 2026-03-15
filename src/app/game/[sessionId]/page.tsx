@@ -85,7 +85,7 @@ export default async function GamePage({
     .eq("player_id", user.id)
     .order("created_at");
 
-  // 相手のこれまでのターン
+  // 相手のこれまでのターン（分岐マス）
   const { data: opponentTurns } = opponentUserId
     ? await supabase
         .from("turns")
@@ -95,6 +95,24 @@ export default async function GamePage({
         .order("created_at")
     : { data: [] };
 
+  // 相手の効果マス訪問（turns に記録されないため別途取得）
+  const { data: opponentEffectVisits } = opponentUserId
+    ? await supabase
+        .from("effect_visits")
+        .select("square_index")
+        .eq("session_id", sessionId)
+        .eq("player_id", opponentUserId)
+    : { data: [] };
+
+  // 相手の現在位置（turns + effect_visits の両方から最大マスを計算）
+  const allOpponentSquares = [
+    ...(opponentTurns ?? []).map((t) => t.square_index),
+    ...(opponentEffectVisits ?? []).map((v) => v.square_index),
+  ];
+  const initialOpponentPosition = allOpponentSquares.length > 0
+    ? Math.max(...allOpponentSquares)
+    : null;
+
   return (
     <GameBoard
       sessionId={sessionId}
@@ -102,6 +120,7 @@ export default async function GamePage({
       mySquares={mySquares ?? []}
       initialTurns={myTurns ?? []}
       initialOpponentTurns={opponentTurns ?? []}
+      initialOpponentPosition={initialOpponentPosition}
       opponentNickname={opponentNickname}
       myNickname={myNickname}
       myUserId={user.id}
