@@ -7,7 +7,7 @@ export async function POST(request: Request) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const { sessionId, squareIndex, chosenIndex } = await request.json();
+  const { sessionId, squareIndex, chosenIndex, diceValue } = await request.json();
 
   const { data: session } = await supabase
     .from("sessions")
@@ -49,6 +49,7 @@ export async function POST(request: Request) {
     square_index: squareIndex,
     chosen_index: chosenIndex,
     is_correct: isCorrect,
+    dice_value: diceValue != null ? Number(diceValue) : null,
   });
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });

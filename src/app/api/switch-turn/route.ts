@@ -8,7 +8,7 @@ export async function POST(request: Request) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const { sessionId, squareIndex } = await request.json();
+  const { sessionId, squareIndex, diceValue } = await request.json();
 
   const { data: session } = await supabase
     .from("sessions")
@@ -35,9 +35,17 @@ export async function POST(request: Request) {
 
   // 効果マス訪問を記録
   if (squareIndex != null) {
-    await supabase
+    const { error: insertError } = await supabase
       .from("effect_visits")
-      .insert({ session_id: sessionId, player_id: user.id, square_index: squareIndex });
+      .insert({
+        session_id: sessionId,
+        player_id: user.id,
+        square_index: squareIndex,
+        dice_value: diceValue != null ? Number(diceValue) : null,
+      });
+    if (insertError) {
+      return NextResponse.json({ error: insertError.message }, { status: 500 });
+    }
   }
 
   await supabase

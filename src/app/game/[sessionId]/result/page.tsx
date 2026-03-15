@@ -1,6 +1,9 @@
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 
+// 常に最新のDBから取得（キャッシュ無効化）
+export const dynamic = "force-dynamic";
+
 export default async function ResultPage({
   params,
 }: {
@@ -31,18 +34,23 @@ export default async function ResultPage({
 
   const { data: turns } = await supabase
     .from("turns")
-    .select("square_index, chosen_index, is_correct")
+    .select("square_index, chosen_index, is_correct, dice_value")
     .eq("session_id", sessionId)
     .eq("player_id", user.id)
     .order("created_at");
 
   const { data: effectVisits } = await supabase
     .from("effect_visits")
-    .select("square_index")
+    .select("square_index, dice_value")
     .eq("session_id", sessionId)
-    .eq("player_id", user.id);
+    .eq("player_id", user.id)
+    .order("created_at");
 
   const visitedEffectIndices = new Set((effectVisits ?? []).map((v) => v.square_index));
+  // 効果マス訪問時のサイコロの目（square_index -> dice_value、同マス複数回は最新を採用）
+  const effectDiceMap = new Map(
+    (effectVisits ?? []).map((v) => [v.square_index, v.dice_value])
+  );
 
   const { data: squares } = await supabase
     .from("squares")
@@ -64,6 +72,8 @@ export default async function ResultPage({
             const wasEffectVisited = isEffect && visitedEffectIndices.has(sq.index);
             const turn = isEffect ? undefined : (turns ?? []).find((t) => t.square_index === sq.index);
             const wasPlayed = !isEffect && turn !== undefined;
+            // 止まったマスのサイコロの目（右上表示用）
+            const diceVal = wasPlayed && turn && "dice_value" in turn ? (turn as { dice_value?: number | null }).dice_value : wasEffectVisited ? effectDiceMap.get(sq.index) : null;
 
             // 止まったマス=色付き、止まっていないマス=グレー
             const borderColor = wasEffectVisited
@@ -94,17 +104,24 @@ export default async function ResultPage({
                   <span className="text-xs text-gray-400">
                     {isEffect ? "" : `${sq.index}マス目`}{sq.age_range ? `・${sq.age_range}` : ""}
                   </span>
-                  {wasPlayed && (
-                    <span className="ml-auto text-sm">
-                      {turn!.is_correct ? "✓" : "✗"}
-                    </span>
-                  )}
-                  {!isEffect && !wasPlayed && (
-                    <span className="ml-auto text-xs text-gray-300">スキップ</span>
-                  )}
-                  {isEffect && !wasEffectVisited && (
-                    <span className="ml-auto text-xs text-gray-300">スキップ</span>
-                  )}
+                  <div className="ml-auto flex items-center gap-2">
+                    {(wasPlayed || wasEffectVisited) && (
+                      <span className="rounded bg-amber-100 px-1.5 py-0.5 text-xs font-bold text-amber-700">
+                        🎲 {(wasPlayed ? turn?.dice_value : effectDiceMap.get(sq.index)) ?? "?"}
+                      </span>
+                    )}
+                    {wasPlayed && (
+                      <span className="text-sm">
+                        {turn!.is_correct ? "✓" : "✗"}
+                      </span>
+                    )}
+                    {!isEffect && !wasPlayed && (
+                      <span className="text-xs text-gray-300">スキップ</span>
+                    )}
+                    {isEffect && !wasEffectVisited && (
+                      <span className="text-xs text-gray-300">スキップ</span>
+                    )}
+                  </div>
                 </div>
                 <p className={`mb-2 text-sm font-medium ${(!wasPlayed && !wasEffectVisited) ? "text-gray-400" : "text-gray-800"}`}>{sq.event}</p>
 

@@ -87,6 +87,8 @@ export default function GameBoard({
   const channelRef = useRef<RealtimeChannel | null>(null);
   // 相手の前回アクションを追跡（idle復帰でターン切り替えを検出するため）
   const prevOpponentActionRef = useRef<string | null>(null);
+  // 着地時のサイコロの目（state の非同期を避け API に確実に渡すため）
+  const diceValueRef = useRef<number | null>(null);
 
   const [turns, setTurns] = useState<Turn[]>(initialTurns);
   const [opponentTurns, setOpponentTurns] = useState<Turn[]>(initialOpponentTurns);
@@ -220,10 +222,11 @@ export default function GameBoard({
     const interval = setInterval(() => {
       setDiceValue(Math.ceil(Math.random() * 3));
       count++;
-      if (count >= 8) {
+        if (count >= 8) {
         clearInterval(interval);
         const final = Math.ceil(Math.random() * 3);
         setDiceValue(final);
+        diceValueRef.current = final;
 
         setTimeout(() => {
           const rawTarget = position + (final - 1);
@@ -255,12 +258,12 @@ export default function GameBoard({
 
           if (sq?.square_type === "effect") {
             setPhase("effect");
-            trackAction({ action: "effect_viewing", targetSquareIndex: targetIndex, currentSquare: sq ? {
+            trackAction({ action: "effect_viewing", diceValue: final, targetSquareIndex: targetIndex, currentSquare: sq ? {
               index: sq.index, event: sq.event, square_type: sq.square_type, effect: sq.effect,
             } : undefined });
           } else {
             setPhase("choosing");
-            trackAction({ action: "choosing", targetSquareIndex: targetIndex, currentSquare: sq ? {
+            trackAction({ action: "choosing", diceValue: final, targetSquareIndex: targetIndex, currentSquare: sq ? {
               index: sq.index, event: sq.event, square_type: sq.square_type,
               choice_a: sq.choice_a, choice_b: sq.choice_b,
             } : undefined });
@@ -277,7 +280,7 @@ export default function GameBoard({
     const res = await fetch("/api/turn", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ sessionId, squareIndex: currentSquareIndex, chosenIndex }),
+      body: JSON.stringify({ sessionId, squareIndex: currentSquareIndex, chosenIndex, diceValue: diceValueRef.current ?? diceValue ?? null }),
     });
 
     const data = await res.json();
@@ -289,6 +292,7 @@ export default function GameBoard({
     setPhase("revealed");
     trackAction({
       action: "revealed",
+      diceValue: diceValueRef.current ?? diceValue ?? undefined,
       targetSquareIndex: currentSquareIndex,
       chosenIndex,
       isCorrect: data.isCorrect,
@@ -323,11 +327,12 @@ export default function GameBoard({
       setPosition(newPos);
     }
 
-    // DBのターン切り替えと効果マス訪問記録をバックグラウンドで実行
+    // DBのターン切り替えと効果マス訪問記録を実行
+    const dv = diceValueRef.current ?? diceValue;
     fetch("/api/switch-turn", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ sessionId, squareIndex: currentSquareIndex }),
+      body: JSON.stringify({ sessionId, squareIndex: currentSquareIndex, diceValue: dv != null ? dv : null }),
     }).catch(() => {});
 
     if (newPos > 10) {
@@ -345,6 +350,7 @@ export default function GameBoard({
     setPhase("idle");
     setCurrentSquareIndex(null);
     setDiceValue(null);
+    diceValueRef.current = null;
   }
 
   function handleNext() {
@@ -368,6 +374,7 @@ export default function GameBoard({
     setCurrentSquareIndex(null);
     setChoiceResult(null);
     setDiceValue(null);
+    diceValueRef.current = null;
   }
 
   const currentSquare = currentSquareIndex !== null
@@ -446,30 +453,121 @@ export default function GameBoard({
           </div>
         )}
 
-        {/* 相手の進捗バー（自分のターン中のみ表示） */}
-        {isMyTurn && <div className="rounded-xl border border-gray-200 bg-white px-4 py-3 shadow-sm">
-          <p className="mb-2 text-[10px] font-black uppercase tracking-widest text-gray-400">
-            {opponentNickname} の進捗
-          </p>
-          <div className="flex gap-1">
-            {Array.from({ length: 10 }, (_, i) => {
-              const idx = i + 1;
-              const sq = squares.find((s) => s.index === idx);
-              const t = opponentTurns.find((t) => t.square_index === idx);
-              const isEffect = sq?.square_type === "effect";
-              return (
-                <div key={idx} className={`flex-1 rounded py-1.5 text-center text-[10px] font-black transition-all ${
-                  isEffect ? "bg-amber-100 text-amber-500"
-                  : t ? (t.is_correct ? "bg-emerald-100 text-emerald-600" : "bg-rose-100 text-rose-500")
-                  : "bg-gray-100 text-gray-400"
-                }`}>
-                  {isEffect ? "⚡" : t ? (t.is_correct ? "✓" : "✗") : "🔀"}
-                </div>
-              );
-            })}
+        {/* 自分のターン：サイコロ（ボードより上に表示） */}
+        {isMyTurn && phase === "idle" && (
+          <div className="rounded-2xl border border-gray-200 bg-white p-6 text-center shadow-sm">
+            <p className="mb-1 text-xs font-bold uppercase tracking-widest text-gray-400">
+              現在地：マス {position - 1 <= 0 ? "START" : position - 1}
+            </p>
+            <button
+              onClick={rollDice}
+              className="mt-3 w-full rounded-xl bg-amber-500 py-5 text-xl font-black text-white shadow-lg shadow-amber-500/25 transition hover:bg-amber-400 active:scale-95"
+            >
+              🎲 ROLL DICE
+            </button>
+            <p className="mt-2 text-[10px] text-gray-400">サイコロ（1〜3）の目だけ進む</p>
           </div>
-          <p className="mt-1.5 text-right text-[10px] text-gray-400">{opponentScore} / {opponentTurns.length} 共感</p>
-        </div>}
+        )}
+
+        {/* 自分のターン：サイコロアニメーション（ボードより上に表示） */}
+        {isMyTurn && phase === "rolling" && (
+          <div className="rounded-2xl border border-gray-200 bg-white p-8 text-center shadow-sm">
+            <div className="text-8xl">{diceValue ? DICE_FACES[diceValue] : "🎲"}</div>
+            <p className="mt-3 text-sm font-bold text-amber-500 animate-pulse">ROLLING...</p>
+          </div>
+        )}
+
+        {/* 自分のターン：効果マス（ボードより上に表示） */}
+        {isMyTurn && phase === "effect" && currentSquare && (
+          <div className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
+            <div className="mb-3 flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <span className="rounded-lg bg-amber-100 px-2 py-1 text-xs font-black text-amber-600">{currentSquare.index}マス目 ⚡</span>
+                {currentSquare.age_range && <span className="text-xs text-gray-400">{currentSquare.age_range}</span>}
+              </div>
+              <span className="shrink-0 rounded-lg bg-amber-100 px-2.5 py-1 text-sm font-black text-amber-700">🎲 {diceValueRef.current ?? diceValue ?? "?"}</span>
+            </div>
+            <p className="my-4 text-sm font-medium leading-relaxed text-gray-800">{currentSquare.event}</p>
+            <div className={`rounded-xl border p-4 text-center ${
+              currentSquare.effect === 1
+                ? "border-emerald-200 bg-emerald-50"
+                : "border-rose-200 bg-rose-50"
+            }`}>
+              <p className={`text-2xl font-black ${currentSquare.effect === 1 ? "text-emerald-600" : "text-rose-600"}`}>
+                {currentSquare.effect === 1 ? "⬆ 1マス進む！" : "⬇ 1マス戻る"}
+              </p>
+              <p className="mt-1 text-xs text-gray-500">
+                {currentSquare.effect === 1 ? "次のマスをスキップして進みます" : "1つ前のマスから再スタート"}
+              </p>
+            </div>
+            <button
+              onClick={handleEffectConfirm}
+              className="mt-4 w-full rounded-xl bg-amber-500 py-3 text-sm font-black text-white shadow-lg shadow-amber-500/20 transition hover:bg-amber-400 active:scale-95"
+            >
+              相手のターンへ →
+            </button>
+          </div>
+        )}
+
+        {/* 自分のターン：分岐マス（選択・結果）（ボードより上に表示） */}
+        {isMyTurn && (phase === "choosing" || phase === "revealed") && currentSquare && (
+          <div className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
+            <div className="mb-3 flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <span className="rounded-lg bg-amber-100 px-2 py-1 text-xs font-black text-amber-600">{currentSquare.index}マス目 🔀</span>
+                {currentSquare.age_range && <span className="text-xs text-gray-400">{currentSquare.age_range}</span>}
+              </div>
+              <span className="shrink-0 rounded-lg bg-amber-100 px-2.5 py-1 text-sm font-black text-amber-700">🎲 {diceValueRef.current ?? diceValue ?? "?"}</span>
+            </div>
+            <p className="my-4 text-sm font-medium leading-relaxed text-gray-800">{currentSquare.event}</p>
+            <p className="mb-3 text-xs font-bold uppercase tracking-widest text-gray-400">
+              {phase === "choosing" ? `${opponentNickname} の選択は？` : "ANSWER"}
+            </p>
+            <div className="space-y-2">
+              {([currentSquare.choice_a, currentSquare.choice_b] as const).map((choice, idx) => {
+                const isAnswer = currentSquare.answer_index === idx;
+                const isChosen = phase === "revealed" && turns[turns.length - 1]?.chosen_index === idx;
+                let btnClass = "w-full rounded-xl border-2 px-4 py-3 text-left text-sm font-medium transition-all";
+                if (phase === "revealed") {
+                  if (isAnswer) btnClass += " border-emerald-400 bg-emerald-50 text-emerald-800";
+                  else if (isChosen && !isAnswer) btnClass += " border-rose-400 bg-rose-50 text-rose-700";
+                  else btnClass += " border-gray-100 bg-gray-50 text-gray-400";
+                } else {
+                  btnClass += " border-gray-200 bg-white text-gray-700 hover:border-amber-400 hover:bg-amber-50";
+                }
+                return (
+                  <button
+                    key={idx}
+                    onClick={() => phase === "choosing" ? handleChoice(idx as 0 | 1) : undefined}
+                    disabled={phase === "revealed" || loading}
+                    className={btnClass}
+                  >
+                    <span className="mr-2 font-black text-amber-500">{idx === 0 ? "A" : "B"}</span>
+                    {choice}
+                    {phase === "revealed" && isAnswer && <span className="ml-2 text-emerald-600">← 正解</span>}
+                  </button>
+                );
+              })}
+            </div>
+            {phase === "revealed" && choiceResult && (
+              <div className={`mt-4 rounded-xl border p-3 text-center text-sm font-black ${
+                choiceResult.isCorrect
+                  ? "border-emerald-300 bg-emerald-50 text-emerald-700"
+                  : "border-rose-300 bg-rose-50 text-rose-700"
+              }`}>
+                {choiceResult.isCorrect ? "✓ 共感！同じ選択でした" : "✗ 違う選択でした"}
+              </div>
+            )}
+            {phase === "revealed" && (
+              <button
+                onClick={handleNext}
+                className="mt-4 w-full rounded-xl bg-amber-500 py-3 text-sm font-black text-white shadow-lg shadow-amber-500/20 transition hover:bg-amber-400 active:scale-95"
+              >
+                {currentSquareIndex! >= 10 ? "ゴールへ 🎊" : "相手のターンへ →"}
+              </button>
+            )}
+          </div>
+        )}
 
         {/* すごろくボード（自分のターン中のみ表示） */}
         {isMyTurn && <div>
@@ -492,11 +590,8 @@ export default function GameBoard({
             const isStandingHere = isCurrent || (currentSquareIndex === null && sq.index === position - 1);
             const isEffect = sq.square_type === "effect";
 
-            // 矢印の色
-            let arrowColor: string;
-            if (isCurrent) arrowColor = "text-amber-500";
-            else if (turn) arrowColor = turn.is_correct ? "text-emerald-400" : "text-rose-400";
-            else arrowColor = "text-amber-300";
+            // 矢印の色（全て統一）
+            const arrowColor = "text-amber-300";
 
             // マス背景
             let rowClass = "flex items-center gap-3 rounded-xl px-4 py-3 transition-all duration-200 ";
@@ -556,8 +651,8 @@ export default function GameBoard({
 
           {/* GOAL前コネクター */}
           <div className="flex flex-col items-center my-0.5">
-            <div className={`h-3 w-px ${position > 10 ? "bg-amber-400" : "bg-amber-300"}`} />
-            <svg width="9" height="6" viewBox="0 0 9 6" className={`transition-colors ${position > 10 ? "text-amber-500" : "text-amber-300"}`} fill="currentColor">
+            <div className="h-3 w-px bg-amber-300" />
+            <svg width="9" height="6" viewBox="0 0 9 6" className="text-amber-300" fill="currentColor">
               <polygon points="0,0 9,0 4.5,6" />
             </svg>
           </div>
@@ -579,118 +674,6 @@ export default function GameBoard({
             </div>
           </div>
         </div>}
-
-        {/* ======== アクションエリア ======== */}
-
-        {/* 自分のターン：サイコロ */}
-        {isMyTurn && phase === "idle" && (
-          <div className="rounded-2xl border border-gray-200 bg-white p-6 text-center shadow-sm">
-            <p className="mb-1 text-xs font-bold uppercase tracking-widest text-gray-400">
-              現在地：マス {position - 1 <= 0 ? "START" : position - 1}
-            </p>
-            <button
-              onClick={rollDice}
-              className="mt-3 w-full rounded-xl bg-amber-500 py-5 text-xl font-black text-white shadow-lg shadow-amber-500/25 transition hover:bg-amber-400 active:scale-95"
-            >
-              🎲 ROLL DICE
-            </button>
-            <p className="mt-2 text-[10px] text-gray-400">サイコロ（1〜3）の目だけ進む</p>
-          </div>
-        )}
-
-        {/* 自分のターン：サイコロアニメーション */}
-        {isMyTurn && phase === "rolling" && (
-          <div className="rounded-2xl border border-gray-200 bg-white p-8 text-center shadow-sm">
-            <div className="text-8xl">{diceValue ? DICE_FACES[diceValue] : "🎲"}</div>
-            <p className="mt-3 text-sm font-bold text-amber-500 animate-pulse">ROLLING...</p>
-          </div>
-        )}
-
-        {/* 自分のターン：効果マス */}
-        {isMyTurn && phase === "effect" && currentSquare && (
-          <div className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
-            <div className="mb-3 flex items-center gap-2">
-              <span className="rounded-lg bg-amber-100 px-2 py-1 text-xs font-black text-amber-600">⚡ 効果マス {currentSquare.index}</span>
-              {currentSquare.age_range && <span className="text-xs text-gray-400">{currentSquare.age_range}</span>}
-            </div>
-            <p className="my-4 text-sm font-medium leading-relaxed text-gray-800">{currentSquare.event}</p>
-            <div className={`rounded-xl border p-4 text-center ${
-              currentSquare.effect === 1
-                ? "border-emerald-200 bg-emerald-50"
-                : "border-rose-200 bg-rose-50"
-            }`}>
-              <p className={`text-2xl font-black ${currentSquare.effect === 1 ? "text-emerald-600" : "text-rose-600"}`}>
-                {currentSquare.effect === 1 ? "⬆ 1マス進む！" : "⬇ 1マス戻る"}
-              </p>
-              <p className="mt-1 text-xs text-gray-500">
-                {currentSquare.effect === 1 ? "次のマスをスキップして進みます" : "1つ前のマスから再スタート"}
-              </p>
-            </div>
-            <button
-              onClick={handleEffectConfirm}
-              className="mt-4 w-full rounded-xl bg-amber-500 py-3 text-sm font-black text-white shadow-lg shadow-amber-500/20 transition hover:bg-amber-400 active:scale-95"
-            >
-              確認して進む →
-            </button>
-          </div>
-        )}
-
-        {/* 自分のターン：分岐マス（選択・結果） */}
-        {isMyTurn && (phase === "choosing" || phase === "revealed") && currentSquare && (
-          <div className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
-            <div className="mb-3 flex items-center gap-2">
-              <span className="rounded-lg bg-amber-100 px-2 py-1 text-xs font-black text-amber-600">🔀 分岐マス {currentSquare.index}</span>
-              {currentSquare.age_range && <span className="text-xs text-gray-400">{currentSquare.age_range}</span>}
-            </div>
-            <p className="my-4 text-sm font-medium leading-relaxed text-gray-800">{currentSquare.event}</p>
-            <p className="mb-3 text-xs font-bold uppercase tracking-widest text-gray-400">
-              {phase === "choosing" ? `${opponentNickname} の選択は？` : "ANSWER"}
-            </p>
-            <div className="space-y-2">
-              {([currentSquare.choice_a, currentSquare.choice_b] as const).map((choice, idx) => {
-                const isAnswer = currentSquare.answer_index === idx;
-                const isChosen = phase === "revealed" && turns[turns.length - 1]?.chosen_index === idx;
-                let btnClass = "w-full rounded-xl border-2 px-4 py-3 text-left text-sm font-medium transition-all";
-                if (phase === "revealed") {
-                  if (isAnswer) btnClass += " border-emerald-400 bg-emerald-50 text-emerald-800";
-                  else if (isChosen && !isAnswer) btnClass += " border-rose-400 bg-rose-50 text-rose-700";
-                  else btnClass += " border-gray-100 bg-gray-50 text-gray-400";
-                } else {
-                  btnClass += " border-gray-200 bg-white text-gray-700 hover:border-amber-400 hover:bg-amber-50";
-                }
-                return (
-                  <button
-                    key={idx}
-                    onClick={() => phase === "choosing" ? handleChoice(idx as 0 | 1) : undefined}
-                    disabled={phase === "revealed" || loading}
-                    className={btnClass}
-                  >
-                    <span className="mr-2 font-black text-amber-500">{idx === 0 ? "A" : "B"}</span>
-                    {choice}
-                    {phase === "revealed" && isAnswer && <span className="ml-2 text-emerald-600">← 正解</span>}
-                  </button>
-                );
-              })}
-            </div>
-            {phase === "revealed" && choiceResult && (
-              <div className={`mt-4 rounded-xl border p-3 text-center text-sm font-black ${
-                choiceResult.isCorrect
-                  ? "border-emerald-300 bg-emerald-50 text-emerald-700"
-                  : "border-rose-300 bg-rose-50 text-rose-700"
-              }`}>
-                {choiceResult.isCorrect ? "✓ 共感！同じ選択でした" : "✗ 違う選択でした"}
-              </div>
-            )}
-            {phase === "revealed" && (
-              <button
-                onClick={handleNext}
-                className="mt-4 w-full rounded-xl bg-amber-500 py-3 text-sm font-black text-white shadow-lg shadow-amber-500/20 transition hover:bg-amber-400 active:scale-95"
-              >
-                {currentSquareIndex! >= 10 ? "ゴールへ 🎊" : "次のマスへ →"}
-              </button>
-            )}
-          </div>
-        )}
 
         {/* 相手のターン：観戦モード */}
         {!isMyTurn && (() => {
@@ -748,16 +731,23 @@ export default function GameBoard({
               {/* 分岐マス：選択中 / 結果 */}
               {(opponentPresence?.action === "choosing" || opponentPresence?.action === "revealed") && opponentPresence.currentSquare && (
                 <div>
-                  <div className="mb-3 flex items-center gap-2">
-                    <span className="rounded-lg bg-amber-100 px-2 py-1 text-xs font-black text-amber-600">
-                      🔀 マス {opponentPresence.currentSquare.index}
-                    </span>
-                    {opponentPresence.action === "choosing" && (
-                      <span className="text-xs font-bold text-gray-400 animate-pulse">選択中...</span>
-                    )}
-                    {opponentPresence.action === "revealed" && (
-                      <span className={`text-xs font-black ${opponentPresence.isCorrect ? "text-emerald-600" : "text-rose-500"}`}>
-                        {opponentPresence.isCorrect ? "✓ 共感！" : "✗ 違う選択"}
+                  <div className="mb-3 flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <span className="rounded-lg bg-amber-100 px-2 py-1 text-xs font-black text-amber-600">
+                        {opponentPresence.currentSquare.index}マス目 🔀
+                      </span>
+                      {opponentPresence.action === "choosing" && (
+                        <span className="text-xs font-bold text-gray-400 animate-pulse">選択中...</span>
+                      )}
+                      {opponentPresence.action === "revealed" && (
+                        <span className={`text-xs font-black ${opponentPresence.isCorrect ? "text-emerald-600" : "text-rose-500"}`}>
+                          {opponentPresence.isCorrect ? "✓ 共感！" : "✗ 違う選択"}
+                        </span>
+                      )}
+                    </div>
+                    {opponentPresence.diceValue != null && (
+                      <span className="shrink-0 rounded-lg bg-amber-100 px-2.5 py-1 text-sm font-black text-amber-700">
+                        🎲 {opponentPresence.diceValue}
                       </span>
                     )}
                   </div>
@@ -796,10 +786,15 @@ export default function GameBoard({
               {/* 効果マス */}
               {opponentPresence?.action === "effect_viewing" && opponentPresence.currentSquare && (
                 <div>
-                  <div className="mb-3 flex items-center gap-2">
+                  <div className="mb-3 flex items-center justify-between gap-2">
                     <span className="rounded-lg bg-amber-100 px-2 py-1 text-xs font-black text-amber-600">
-                      ⚡ 効果マス {opponentPresence.currentSquare.index}
+                      {opponentPresence.currentSquare.index}マス目 ⚡
                     </span>
+                    {opponentPresence.diceValue != null && (
+                      <span className="shrink-0 rounded-lg bg-amber-100 px-2.5 py-1 text-sm font-black text-amber-700">
+                        🎲 {opponentPresence.diceValue}
+                      </span>
+                    )}
                   </div>
                   <p className="mb-3 text-sm font-medium text-gray-700">{opponentPresence.currentSquare.event}</p>
                   <div className={`rounded-xl border-2 p-4 text-center ${
@@ -852,9 +847,8 @@ export default function GameBoard({
                 const isActive = isOpponentHere || isLanding;
                 const isEffect = sq.square_type === "effect";
 
-                let arrowColor = "text-amber-300";
-                if (isActive) arrowColor = "text-amber-500";
-                else if (opTurn) arrowColor = opTurn.is_correct ? "text-emerald-400" : "text-rose-400";
+                // 矢印の色（全て統一）
+                const arrowColor = "text-amber-300";
 
                 let rowClass = "flex items-center gap-3 rounded-xl border px-4 py-3 transition-all ";
                 if (isActive) rowClass += "border-amber-400 bg-amber-500 shadow-lg shadow-amber-500/25 scale-[1.01]";
@@ -896,8 +890,8 @@ export default function GameBoard({
 
               {/* GOAL */}
               <div className="flex flex-col items-center my-0.5">
-                <div className={`h-3 w-px ${spectatorPosition > 10 ? "bg-amber-400" : "bg-amber-300"}`} />
-                <svg width="9" height="6" viewBox="0 0 9 6" className={spectatorPosition > 10 ? "text-amber-500" : "text-amber-300"}>
+                <div className="h-3 w-px bg-amber-300" />
+                <svg width="9" height="6" viewBox="0 0 9 6" className="text-amber-300">
                   <polygon points="4.5,6 0,0 9,0" fill="currentColor" />
                 </svg>
               </div>
