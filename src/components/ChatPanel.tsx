@@ -26,7 +26,13 @@ export default function ChatPanel({
   const [messages, setMessages] = useState<Message[]>(initialMessages);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
-  const bottomRef = useRef<HTMLDivElement>(null);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+
+  // 親から渡された initialMessages が変わったら同期（結果ページから戻ってきたとき等）
+  useEffect(() => {
+    setMessages(initialMessages);
+  }, [initialMessages]);
 
   // Supabase Realtimeでメッセージを購読
   useEffect(() => {
@@ -52,10 +58,31 @@ export default function ChatPanel({
             .eq("id", msg.user_id)
             .single();
 
+          const nickname = profile?.nickname ?? "相手";
+          setToastMessage(`${nickname}からメッセージが届きました`);
           setMessages((prev) => [
             ...prev,
             { ...msg, profiles: profile },
           ]);
+
+          // タブが非表示ならブラウザ通知
+          if (typeof window !== "undefined" && document.hidden && "Notification" in window) {
+            if (Notification.permission === "granted") {
+              new Notification(`${nickname}からメッセージ`, {
+                body: msg.body.slice(0, 50) + (msg.body.length > 50 ? "…" : ""),
+                icon: "/favicon.ico",
+              });
+            } else if (Notification.permission === "default") {
+              Notification.requestPermission().then((p) => {
+                if (p === "granted") {
+                  new Notification(`${nickname}からメッセージ`, {
+                    body: msg.body.slice(0, 50) + (msg.body.length > 50 ? "…" : ""),
+                    icon: "/favicon.ico",
+                  });
+                }
+              });
+            }
+          }
         }
       )
       .subscribe();
@@ -63,10 +90,18 @@ export default function ChatPanel({
     return () => { supabase.removeChannel(channel); };
   }, [sessionId, myUserId, supabase]);
 
-  // 新しいメッセージが来たら最下部にスクロール
+  // 新しいメッセージが来たらチャット内のみ最下部にスクロール（ページ全体は動かさない）
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    const el = scrollContainerRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
   }, [messages]);
+
+  // トーストを2.5秒後に消す
+  useEffect(() => {
+    if (!toastMessage) return;
+    const t = setTimeout(() => setToastMessage(null), 2500);
+    return () => clearTimeout(t);
+  }, [toastMessage]);
 
   async function handleSend(e: React.FormEvent) {
     e.preventDefault();
@@ -94,9 +129,21 @@ export default function ChatPanel({
   }
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full flex-col relative">
+      {/* 受信トースト */}
+      {toastMessage && (
+        <div
+          role="alert"
+          className="fixed top-2 left-2 right-2 z-50 rounded-xl bg-amber-500 text-white px-4 py-2 text-sm font-medium shadow-lg"
+        >
+          {toastMessage}
+        </div>
+      )}
       {/* メッセージ一覧 */}
-      <div className="flex-1 overflow-y-auto space-y-3 p-4">
+      <div
+        ref={scrollContainerRef}
+        className="flex-1 overflow-y-auto space-y-3 p-4"
+      >
         {messages.length === 0 && (
           <p className="text-center text-xs text-gray-400 py-8">
             まだメッセージはありません。
@@ -127,7 +174,6 @@ export default function ChatPanel({
             </div>
           );
         })}
-        <div ref={bottomRef} />
       </div>
 
       {/* 入力欄 */}

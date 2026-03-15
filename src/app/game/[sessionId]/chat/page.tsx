@@ -3,6 +3,9 @@ import { redirect } from "next/navigation";
 import ChatPanel from "@/components/ChatPanel";
 import Link from "next/link";
 
+// 毎回最新メッセージをDBから取得（結果ページから戻ってきても過去チャットが消えないようにする）
+export const dynamic = "force-dynamic";
+
 export default async function ChatPage({
   params,
 }: {
