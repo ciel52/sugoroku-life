@@ -1,65 +1,129 @@
-import Image from "next/image";
+import { createClient } from "@/lib/supabase/server";
+import { redirect } from "next/navigation";
+import Link from "next/link";
+import InviteLinkBox from "./board/[boardId]/complete/InviteLinkBox";
 
-export default function Home() {
+export default async function HomePage() {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+
+  if (!user) redirect("/auth/login");
+
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("nickname")
+    .eq("id", user.id)
+    .single();
+
+  if (!profile?.nickname) redirect("/profile/setup");
+
+  // 自分のボードを取得
+  const { data: myBoard } = await supabase
+    .from("boards")
+    .select("id, title")
+    .eq("user_id", user.id)
+    .maybeSingle();
+
+  // 参加中のセッションを取得（最新）
+  let latestSession: { id: string; status: string } | null = null;
+  if (myBoard) {
+    const { data } = await supabase
+      .from("sessions")
+      .select("id, status")
+      .or(`board_a_id.eq.${myBoard.id},board_b_id.eq.${myBoard.id}`)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    latestSession = data;
+  }
+
   return (
-    <div className="flex min-h-screen items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex min-h-screen w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
+    <div className="flex min-h-screen items-center justify-center bg-amber-50 px-4">
+      <div className="w-full max-w-sm">
+        {/* ヘッダー */}
+        <div className="mb-8 text-center">
+          <div className="text-5xl">🎲</div>
+          <h1 className="mt-2 text-2xl font-bold text-amber-900">人生すごろく</h1>
+          <p className="mt-1 text-sm text-amber-700">
+            ようこそ、<span className="font-semibold">{profile.nickname}</span> さん
           </p>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+
+        <div className="space-y-4">
+          {/* ボードなし */}
+          {!myBoard && (
+            <div className="rounded-2xl bg-white p-5 shadow-sm text-center">
+              <p className="mb-4 text-sm text-gray-600">
+                まず自分の人生ボードを作成してください
+              </p>
+              <Link
+                href="/board/create"
+                className="block w-full rounded-xl bg-amber-500 py-3 text-center text-sm font-semibold text-white transition hover:bg-amber-600"
+              >
+                人生ボードを作る
+              </Link>
+            </div>
+          )}
+
+          {/* ボードあり → 招待リンク表示 */}
+          {myBoard && (
+            <div className="rounded-2xl bg-white p-5 shadow-sm">
+              <div className="mb-3 flex items-center justify-between">
+                <div>
+                  <p className="text-xs text-gray-400">あなたのボード</p>
+                  <p className="text-sm font-semibold text-gray-800">「{myBoard.title}」</p>
+                </div>
+                <Link
+                  href="/board/create"
+                  className="rounded-lg bg-amber-50 px-3 py-1.5 text-xs font-medium text-amber-700 hover:bg-amber-100"
+                >
+                  編集する
+                </Link>
+              </div>
+              <p className="mb-3 text-xs text-gray-500">
+                このリンクを相手に送ってゲームを始めましょう
+              </p>
+              <InviteLinkBox boardId={myBoard.id} />
+            </div>
+          )}
+
+          {/* 進行中・過去のゲーム */}
+          {latestSession && (
+            <div className="rounded-2xl bg-white p-5 shadow-sm">
+              <p className="mb-3 text-xs font-medium text-gray-500">直近のゲーム</p>
+              <div className="space-y-2">
+                {latestSession.status === "playing" && (
+                  <Link
+                    href={`/game/${latestSession.id}`}
+                    className="block w-full rounded-xl bg-green-500 py-2.5 text-center text-sm font-semibold text-white transition hover:bg-green-600"
+                  >
+                    ゲームを続ける →
+                  </Link>
+                )}
+                <Link
+                  href={`/game/${latestSession.id}/result`}
+                  className="block w-full rounded-xl border border-gray-200 py-2.5 text-center text-sm font-medium text-gray-600 transition hover:bg-gray-50"
+                >
+                  プレイ結果を見る
+                </Link>
+                <Link
+                  href={`/game/${latestSession.id}/chat`}
+                  className="block w-full rounded-xl border border-gray-200 py-2.5 text-center text-sm font-medium text-gray-600 transition hover:bg-gray-50"
+                >
+                  振り返りチャット
+                </Link>
+              </div>
+            </div>
+          )}
         </div>
-      </main>
+
+        {/* ログアウト */}
+        <form action="/auth/signout" method="post" className="mt-8 text-center">
+          <button type="submit" className="text-xs text-gray-400 underline hover:text-gray-600">
+            ログアウト
+          </button>
+        </form>
+      </div>
     </div>
   );
 }
