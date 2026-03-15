@@ -331,7 +331,7 @@ export default function GameBoard({
   const nextSquare = getSquareAt(position);
 
   // ゲーム終了画面
-  if (isFinished || phase === "finished") {
+  if (isFinished) {
     const branchSquaresTotal = squares.filter((s) => s.square_type === "branch").length;
     return (
       <div className="flex min-h-screen items-center justify-center bg-amber-50 px-4">
